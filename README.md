@@ -12,7 +12,7 @@ Administration -> Integration -> New integration -> Incoming WebHook
 
 Then, submit/save. Open back this webhook, take note on the 'Webhook URL'
 
-**bot also need to have permission in mention here and mention all
+#bot also need to have permission in mention here and mention all
 
 
 2. Update the RocketChat Webhook URL at System Configuration > TicketRocketChat::Webhook
@@ -20,7 +20,7 @@ Then, submit/save. Open back this webhook, take note on the 'Webhook URL'
 3. Update the RocketChat Queue->Channel in System Configuration >TicketRocketChat::Channel
 
 Queue 1 Name => RocketChat channel  
-Helpdesk => #helpdesk 
+Helpdesk => #helpdesk  
 an so on..
 
 4. Admin must create a new Generic Agent (GA) with option to execute custom module.
