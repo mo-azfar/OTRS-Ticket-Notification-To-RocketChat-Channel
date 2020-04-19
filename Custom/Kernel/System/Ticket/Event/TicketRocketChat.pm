@@ -1,10 +1,23 @@
+# --
+# Copyright (C) 2001-2017 OTRS AG, http://otrs.com/
+# --
 # This software comes with ABSOLUTELY NO WARRANTY. For details, see
 # the enclosed file COPYING for license information (AGPL). If you
 # did not receive this file, see http://www.gnu.org/licenses/agpl.txt.
 # --
 #Send a rockect chat notification to otrs bot in general chat channel upon ticket action. E.g: TicketQueueUpdate
+#20181113 - send notification in specific channel based on queue name 
+#20181116 - build based ticket link referring to sysconfig
+#20181218 - The RC webhook defined in GA instead here
+#20181218 - Make all rw members username is mention in message instead of @all. 
 #OTRS USERNAME = RC USERNAME
-#
+#20200401 - build back RC URL based referring to System Configuration (TicketRocketChat::Webhook)
+#		  - ability to define a Text to be send. (Param Key = > Text1)
+#		  - adding support to sent Text2 Param (Optional field).
+#		  - Channel name now is based referring to System Configuration (TicketRocketChat::Channel)
+#20200419 - Using Task scheduler instead direct sending
+#		  - Built self API for sending telegram (using LWP). 
+
 package Kernel::System::Ticket::Event::TicketRocketChat;
 
 use strict;
@@ -15,13 +28,12 @@ use File::Basename;
 use FindBin qw($RealBin);
 use lib dirname($RealBin);
 
-use SOAP::Lite;
 use Data::Dumper;
 use Fcntl qw(:flock SEEK_END);
 use REST::Client;
 use JSON;
 use LWP::UserAgent;
-
+use HTTP::Request::Common;
 #yum install -y perl-LWP-Protocol-https
 #yum install -y perl-JSON-MaybeXS
 #cpan REST::Client
@@ -184,47 +196,105 @@ sub Run {
             return;
         }
   	    
-		my $ticket_link = $HttpType.'://'.$FQDN.'/'.$ScriptAlias.'index.pl?Action=AgentTicketZoom;TicketID='.$TicketID;
-		my $params = {
-		    'username'                      => 'OTRS Bot',
-		    'text'                   		=> $Message1,  ##for mention specific user, use \@username in message portion
-			'channel'	=> $Channel,
-			##'channel[0]'	=> '@maba',  ##for direct message to user
-			##'channel[1]'	=> '@maba2', ##for direct message to user 2
-			'attachments[0][title]'	=> "Ticket#$Ticket{TicketNumber}",
-			'attachments[0][text]'	=> "Create : $DateTimeString\nQueue : $Ticket{Queue}\nState : $Ticket{State}",
-			'attachments[1][title]'	=> 'View Ticket',
-			'attachments[1][title_link]'	=> $ticket_link,
-			'attachments[1][text]'	=> 'Go To The Ticket',
-		  
-		};
+		my $TicketURL = $HttpType.'://'.$FQDN.'/'.$ScriptAlias.'index.pl?Action=AgentTicketPrint;TicketID='.$TicketID;
+
+		# For Asynchronous sending
+		my $TaskName = substr "Recipient".rand().$Channel, 0, 255;
 		
-		my $ua = LWP::UserAgent->new;        
-		#$ua->ssl_opts(verify_hostname => 0); # be tolerant to self-signed certificates
-		my $response = $ua->post( $RC_URL, $params );     
+		# instead of direct sending, we use task scheduler
+		my $TaskID = $Kernel::OM->Get('Kernel::System::Scheduler')->TaskAdd(
+			Type                     => 'AsynchronousExecutor',
+			Name                     => $TaskName,
+			Attempts                 =>  1,
+			MaximumParallelInstances =>  0,
+			Data                     => 
+			{
+				Object   => 'Kernel::System::Ticket::Event::TicketRocketChat',
+				Function => 'SendMessageRC',
+				Params   => 
+						{
+							Channel	=>	$Channel,
+							RCURL	=>	$RC_URL,
+							TicketURL	=>	$TicketURL,
+							TicketNumber	=>	$Ticket{TicketNumber},
+							Message	=>	$Message1,
+							Created	=> $DateTimeString,
+							Queue	=> $Ticket{Queue},
+							State	=>	$Ticket{State},	
+							TicketID      => $TicketID, #sent for log purpose
+						},
+			},
+		);
 		
-		my $content  = $response->decoded_content();
-		my $resCode = $response->code();
-		my $result;
-		if ($resCode eq "200")
-		{
-		$result="Success";
-		}
-		else
-		{
-		$result=$content;
-		}
+	}
+   
+}
+
+=cut
+
+		my $Test = $Self->SendMessageRC(
+					Channel	=>	$Channel,
+					RCURL	=>	$RC_URL,
+					TicketURL	=>	$TicketURL,
+					TicketNumber	=>	$Ticket{TicketNumber},
+					Message	=>	$Message1,
+					Created	=> $DateTimeString,
+					Queue	=> $Ticket{Queue},
+					State	=>	$Ticket{State},	
+					TicketID      => $TicketID, #sent for log purpose
+		);
+
+=cut
+
+sub SendMessageRC {
+	my ( $Self, %Param ) = @_;
+
+	my $ua = LWP::UserAgent->new;
+	utf8::decode($Param{Message});
+	
+	my $params = {
+	'username'   => 'OTRS Bot',
+	'text'      => $Param{Message},  ##for mention specific user, use \@username in message portion
+	'channel'	=> $Param{Channel},
+	##'channel[0]'	=> '@maba',  ##for direct message to user
+	##'channel[1]'	=> '@maba2', ##for direct message to user 2
+	'attachments[0][title]'	=> "Ticket#$Param{TicketNumber}",
+	'attachments[0][text]'	=> "Create : $Param{Created}\nQueue : $Param{Queue}\nState : $Param{State}",
+	'attachments[1][title]'	=> 'View Ticket',
+	'attachments[1][title_link]'	=> $Param{TicketURL},
+	'attachments[1][text]'	=> 'Go To The Ticket',	  
+	};
+	
+	        
+	#$ua->ssl_opts(verify_hostname => 0); # be tolerant to self-signed certificates
+	my $response = $ua->post( $Param{RCURL}, $params );
 		
-		## result should write to ticket history
-		my $TicketHistory = $TicketObject->HistoryAdd(
-        TicketID     => $TicketID,
-        QueueID      => $QueueID,
+	#my $response = $ua->request(
+	#	POST $Param{RCURL},
+	#	Content_Type    => 'application/json',
+	#	Content         => JSON::MaybeXS::encode_json($params)
+    #   )	;
+	
+	my $content  = $response->decoded_content();
+	my $resCode =$response->code();
+	
+	if ($resCode ne 200)
+	{
+	$Kernel::OM->Get('Kernel::System::Log')->Log(
+			 Priority => 'error',
+			 Message  => "RocketChat notification for Queue $Param{Queue}: $resCode $content",
+		);
+	}
+	else
+	{
+	my $TicketObject = $Kernel::OM->Get('Kernel::System::Ticket');
+	my $TicketHistory = $TicketObject->HistoryAdd(
+        TicketID     => $Param{TicketID},
         HistoryType  => 'SendAgentNotification',
-        Name         => "Rocket Chat Notification to $Ticket{Queue} : $result",
+        Name         => "Sent RocketChat Notification for Queue $Param{Queue}",
         CreateUserID => 1,
 		);			
 	}
-   
 }
 
 1;
