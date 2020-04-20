@@ -2,14 +2,14 @@
 <otrs_config version="2.0" init="Application">
     <Setting Name="TicketRocketChat::Webhook" Required="0" Valid="1">
         <Description Translatable="1">Defines the RocketChat webhook url</Description>
-        <Navigation>TicketRocketChat</Navigation>
+        <Navigation>RocketChat::Webhook</Navigation>
         <Value>
             <Item ValueType="String" ValueRegex="">RocketChat Webhook URL</Item>
         </Value>
     </Setting>
     <Setting Name="TicketRocketChat::Channel" Required="0" Valid="1">
         <Description Translatable="1">Defines the RocketChat channel name for each queue.</Description>
-        <Navigation>TicketRocketChat</Navigation>
+        <Navigation>RocketChat::Channel</Navigation>
         <Value>
             <Hash>
                 <Item Key="Misc">#misc</Item>
