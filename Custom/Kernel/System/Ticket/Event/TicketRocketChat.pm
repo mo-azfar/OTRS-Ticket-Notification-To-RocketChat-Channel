@@ -1,23 +1,8 @@
-# --
-# Copyright (C) 2001-2017 OTRS AG, http://otrs.com/
-# --
 # This software comes with ABSOLUTELY NO WARRANTY. For details, see
 # the enclosed file COPYING for license information (AGPL). If you
 # did not receive this file, see http://www.gnu.org/licenses/agpl.txt.
 # --
-#Send a rockect chat notification to otrs bot in general chat channel upon ticket action. E.g: TicketQueueUpdate
-#20181113 - send notification in specific channel based on queue name 
-#20181116 - build based ticket link referring to sysconfig
-#20181218 - The RC webhook defined in GA instead here
-#20181218 - Make all rw members username is mention in message instead of @all. 
-#OTRS USERNAME = RC USERNAME
-#20200401 - build back RC URL based referring to System Configuration (TicketRocketChat::Webhook)
-#		  - ability to define a Text to be send. (Param Key = > Text1)
-#		  - adding support to sent Text2 Param (Optional field).
-#		  - Channel name now is based referring to System Configuration (TicketRocketChat::Channel)
-#20200419 - Using Task scheduler instead direct sending
-#		  - Built self API for sending telegram (using LWP). 
-
+#Send ticket notification to rocket chat channel upon ticket action. E.g: TicketQueueUpdate
 package Kernel::System::Ticket::Event::TicketRocketChat;
 
 use strict;
@@ -30,14 +15,6 @@ use lib dirname($RealBin);
 
 use Data::Dumper;
 use Fcntl qw(:flock SEEK_END);
-use REST::Client;
-use JSON;
-use LWP::UserAgent;
-use HTTP::Request::Common;
-#yum install -y perl-LWP-Protocol-https
-#yum install -y perl-JSON-MaybeXS
-#cpan REST::Client
-#cpan LWP::UserAgent
 
 our @ObjectDependencies = (
     'Kernel::System::Ticket',
@@ -209,8 +186,8 @@ sub Run {
 			MaximumParallelInstances =>  0,
 			Data                     => 
 			{
-				Object   => 'Kernel::System::Ticket::Event::TicketRocketChat',
-				Function => 'SendMessageRC',
+				Object   => 'Kernel::System::CustomMessage',
+				Function => 'SendMessageRCChannel',
 				Params   => 
 						{
 							Channel	=>	$Channel,
@@ -230,72 +207,6 @@ sub Run {
    
 }
 
-=cut
-
-		my $Test = $Self->SendMessageRC(
-					Channel	=>	$Channel,
-					RCURL	=>	$RC_URL,
-					TicketURL	=>	$TicketURL,
-					TicketNumber	=>	$Ticket{TicketNumber},
-					Message	=>	$Message1,
-					Created	=> $DateTimeString,
-					Queue	=> $Ticket{Queue},
-					State	=>	$Ticket{State},	
-					TicketID      => $TicketID, #sent for log purpose
-		);
-
-=cut
-
-sub SendMessageRC {
-	my ( $Self, %Param ) = @_;
-
-	my $ua = LWP::UserAgent->new;
-	utf8::decode($Param{Message});
-	
-	my $params = {
-	'username'   => 'OTRS Bot',
-	'text'      => $Param{Message},  ##for mention specific user, use \@username in message portion
-	'channel'	=> $Param{Channel},
-	##'channel[0]'	=> '@maba',  ##for direct message to user
-	##'channel[1]'	=> '@maba2', ##for direct message to user 2
-	'attachments[0][title]'	=> "Ticket#$Param{TicketNumber}",
-	'attachments[0][text]'	=> "Create : $Param{Created}\nQueue : $Param{Queue}\nState : $Param{State}",
-	'attachments[1][title]'	=> 'View Ticket',
-	'attachments[1][title_link]'	=> $Param{TicketURL},
-	'attachments[1][text]'	=> 'Go To The Ticket',	  
-	};
-	
-	        
-	#$ua->ssl_opts(verify_hostname => 0); # be tolerant to self-signed certificates
-	my $response = $ua->post( $Param{RCURL}, $params );
-		
-	#my $response = $ua->request(
-	#	POST $Param{RCURL},
-	#	Content_Type    => 'application/json',
-	#	Content         => JSON::MaybeXS::encode_json($params)
-    #   )	;
-	
-	my $content  = $response->decoded_content();
-	my $resCode =$response->code();
-	
-	if ($resCode ne 200)
-	{
-	$Kernel::OM->Get('Kernel::System::Log')->Log(
-			 Priority => 'error',
-			 Message  => "RocketChat notification for Queue $Param{Queue}: $resCode $content",
-		);
-	}
-	else
-	{
-	my $TicketObject = $Kernel::OM->Get('Kernel::System::Ticket');
-	my $TicketHistory = $TicketObject->HistoryAdd(
-        TicketID     => $Param{TicketID},
-        HistoryType  => 'SendAgentNotification',
-        Name         => "Sent RocketChat Notification for Queue $Param{Queue}",
-        CreateUserID => 1,
-		);			
-	}
-}
 
 1;
 
