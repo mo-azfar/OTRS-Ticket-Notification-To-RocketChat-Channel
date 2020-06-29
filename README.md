@@ -1,7 +1,7 @@
 # OTRS-Ticket-Notification-To-RocketChat-Channel
 - Built for OTRS CE v6.0.x  
 - Send a ticket notification to Rocket Chat channel upon ticket action. E.g: TicketQueueUpdate
-- **Require CustomMessage API**  
+- **Require [CustomMessage](https://github.com/mo-azfar/OTRS-CustomMessage-API) API**  
 
 1. RC must be configured to accept incoming webhook.  
 Administration -> Integration -> New integration -> Incoming WebHook
