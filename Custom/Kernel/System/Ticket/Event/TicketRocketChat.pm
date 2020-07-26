@@ -13,8 +13,9 @@ use File::Basename;
 use FindBin qw($RealBin);
 use lib dirname($RealBin);
 
-#use Data::Dumper;
-#use Fcntl qw(:flock SEEK_END);
+use JSON::MaybeXS;	#yum install -y perl-JSON-MaybeXS
+use LWP::UserAgent;	#yum install -y perl-LWP-Protocol-https
+use HTTP::Request::Common;
 
 our @ObjectDependencies = (
     'Kernel::System::Ticket',
@@ -24,30 +25,6 @@ our @ObjectDependencies = (
 	'Kernel::System::User',
 	
 );
-
-=head1 NAME
-
-Kernel::System::ITSMConfigItem::Event::DoHistory - Event handler that does the history
-
-=head1 SYNOPSIS
-
-All event handler functions for history.
-
-=head1 PUBLIC INTERFACE
-
-=over 4
-
-=cut
-
-=item new()
-
-create an object
-
-    use Kernel::System::ObjectManager;
-    local $Kernel::OM = Kernel::System::ObjectManager->new();
-    my $DoHistoryObject = $Kernel::OM->Get('Kernel::System::ITSMConfigItem::Event::DoHistory');
-
-=cut
 
 sub new {
     my ( $Type, %Param ) = @_;
@@ -186,7 +163,7 @@ sub Run {
 			MaximumParallelInstances =>  0,
 			Data                     => 
 			{
-				Object   => 'Kernel::System::CustomMessage',
+				Object   => 'Kernel::System::Ticket::Event::TicketRocketChat',
 				Function => 'SendMessageRCChannel',
 				Params   => 
 						{
@@ -207,6 +184,76 @@ sub Run {
    
 }
 
+=cut
+
+		my $Test = $Self->SendMessageRC(
+					Channel	=>	$Channel,
+					RCURL	=>	$RC_URL,
+					TicketURL	=>	$TicketURL,
+					TicketNumber	=>	$Ticket{TicketNumber},
+					Message	=>	$Message1,
+					Created	=> $DateTimeString,
+					Queue	=> $Ticket{Queue},
+					State	=>	$Ticket{State},	
+					TicketID      => $TicketID, #sent for log purpose
+		);
+
+=cut
+
+sub SendMessageRCChannel {
+	my ( $Self, %Param ) = @_;
+
+	# check for needed stuff
+    for my $Needed (qw(Channel RCURL TicketURL TicketNumber Message Created Queue State TicketID)) {
+        if ( !$Param{$Needed} ) {
+            $Kernel::OM->Get('Kernel::System::Log')->Log(
+                Priority => 'error',
+                Message  => "Missing parameter $Needed!",
+            );
+            return;
+        }
+    }
+	
+	my $ua = LWP::UserAgent->new;
+	utf8::decode($Param{Message});
+	
+	my $params = {
+	'username'   => 'OTRS Bot',
+	'text'      => $Param{Message},  ##for mention specific user, use \@username in message portion
+	'channel'	=> $Param{Channel},
+	##'channel[0]'	=> '@maba',  ##for direct message to user
+	##'channel[1]'	=> '@maba2', ##for direct message to user 2
+	'attachments[0][title]'	=> "Ticket#$Param{TicketNumber}",
+	'attachments[0][text]'	=> "Create : $Param{Created}\nQueue : $Param{Queue}\nState : $Param{State}",
+	'attachments[1][title]'	=> 'View Ticket',
+	'attachments[1][title_link]'	=> $Param{TicketURL},
+	'attachments[1][text]'	=> 'Go To The Ticket',	  
+	};
+	
+	#$ua->ssl_opts(verify_hostname => 0); # be tolerant to self-signed certificates
+	my $response = $ua->post( $Param{RCURL}, $params );
+	
+	my $content  = $response->decoded_content();
+	my $resCode =$response->code();
+	
+	if ($resCode ne 200)
+	{
+	$Kernel::OM->Get('Kernel::System::Log')->Log(
+			 Priority => 'error',
+			 Message  => "RocketChat notification for Queue $Param{Queue}: $resCode $content",
+		);
+	}
+	else
+	{
+	my $TicketObject = $Kernel::OM->Get('Kernel::System::Ticket');
+	my $TicketHistory = $TicketObject->HistoryAdd(
+        TicketID     => $Param{TicketID},
+        HistoryType  => 'SendAgentNotification',
+        Name         => "Sent RocketChat Notification for Queue $Param{Queue}",
+        CreateUserID => 1,
+		);			
+	}
+}
 
 1;
 
